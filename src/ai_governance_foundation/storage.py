@@ -63,6 +63,81 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_hash TEXT NOT NULL UNIQUE,
     occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS risk_rules (
+    rule_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK(version >= 1),
+    name TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    measure TEXT NOT NULL CHECK(measure IN ('throttle', 'suspend', 'review')),
+    risk_score INTEGER NOT NULL CHECK(risk_score BETWEEN 1 AND 100),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (rule_id, version)
+);
+CREATE TABLE IF NOT EXISTS authorizations (
+    authorization_id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    target_pattern TEXT NOT NULL,
+    quota INTEGER NOT NULL CHECK(quota > 0),
+    window_seconds INTEGER NOT NULL CHECK(window_seconds > 0),
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    revoked_at TEXT
+);
+CREATE TABLE IF NOT EXISTS action_log (
+    action_id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    received_at TEXT NOT NULL,
+    metadata_json TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_action_log_subject ON action_log(subject_id, occurred_at);
+CREATE TABLE IF NOT EXISTS decisions (
+    decision_id TEXT PRIMARY KEY,
+    action_id TEXT NOT NULL UNIQUE REFERENCES action_log(action_id),
+    subject_id TEXT NOT NULL,
+    target_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    risk_score INTEGER NOT NULL CHECK(risk_score BETWEEN 0 AND 100),
+    measure TEXT NOT NULL CHECK(measure IN ('allow', 'throttle', 'suspend', 'review')),
+    triggered_json TEXT NOT NULL,
+    snapshot_json TEXT NOT NULL,
+    decided_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS interventions (
+    intervention_id TEXT PRIMARY KEY,
+    decision_id TEXT NOT NULL REFERENCES decisions(decision_id),
+    subject_id TEXT NOT NULL,
+    task_id TEXT NOT NULL,
+    kind TEXT NOT NULL CHECK(kind IN ('throttle', 'suspend', 'review')),
+    status TEXT NOT NULL CHECK(status IN ('pending', 'active', 'resolved')),
+    detail_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    expires_at TEXT,
+    resolved_at TEXT,
+    resolved_by TEXT,
+    resolution TEXT,
+    resolution_note TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_interventions_task ON interventions(task_id, status);
+CREATE INDEX IF NOT EXISTS idx_interventions_subject ON interventions(subject_id, kind, status);
+CREATE TABLE IF NOT EXISTS quota_ledger (
+    authorization_id TEXT NOT NULL REFERENCES authorizations(authorization_id),
+    action_id TEXT NOT NULL REFERENCES action_log(action_id),
+    deducted_at TEXT NOT NULL,
+    PRIMARY KEY (authorization_id, action_id)
+);
+CREATE TABLE IF NOT EXISTS task_states (
+    task_id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('running', 'suspended')),
+    updated_at TEXT NOT NULL
+);
 """
 
 

@@ -1,14 +1,14 @@
 import unittest
 
 from ai_governance_foundation.api import route
-from ai_governance_foundation.service import DomainService
+from ai_governance_foundation.intervention import InterventionService
 from ai_governance_foundation.storage import Database
 
 
 class ApiTest(unittest.TestCase):
     def setUp(self):
         self.database = Database()
-        self.service = DomainService(self.database)
+        self.service = InterventionService(self.database)
 
     def tearDown(self):
         self.database.close()

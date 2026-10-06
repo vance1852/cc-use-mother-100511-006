@@ -9,17 +9,18 @@ from typing import Any
 from urllib.parse import parse_qs, urlparse
 
 from .errors import DomainError, ValidationError
-from .service import DomainService
+from .intervention import InterventionService
 from .storage import Database
 
 
-def route(service: DomainService, method: str, path: str, body: dict[str, Any] | None,
+def route(service: InterventionService, method: str, path: str, body: dict[str, Any] | None,
           headers: dict[str, str] | None = None) -> tuple[int, dict[str, Any]]:
     """把一个 HTTP 语义请求分派到领域服务。"""
 
     headers = headers or {}
     body = body or {}
     parsed = urlparse(path)
+    segments = [segment for segment in parsed.path.split("/") if segment]
     actor_id = headers.get("X-Actor-Id", "")
     try:
         if method == "GET" and parsed.path == "/health":
@@ -48,6 +49,35 @@ def route(service: DomainService, method: str, path: str, body: dict[str, Any] |
             query = parse_qs(parsed.query)
             after = int(query.get("after_sequence", ["0"])[0])
             return 200, {"items": service.audit_events(after)}
+        if method == "POST" and parsed.path == "/rules":
+            receipt = service.upsert_rule(actor_id=actor_id, **body)
+            return 200 if receipt.replayed else 201, receipt.__dict__
+        if method == "GET" and parsed.path == "/rules":
+            return 200, {"items": service.list_rules()}
+        if method == "POST" and parsed.path == "/authorizations":
+            receipt = service.grant_authorization(actor_id=actor_id, **body)
+            return 200 if receipt.replayed else 201, receipt.__dict__
+        if method == "GET" and len(segments) == 2 and segments[0] == "authorizations":
+            return 200, service.get_authorization(segments[1])
+        if (method == "POST" and len(segments) == 3 and segments[0] == "authorizations"
+                and segments[2] == "revoke"):
+            receipt = service.revoke_authorization(actor_id=actor_id, authorization_id=segments[1], **body)
+            return 200 if receipt.replayed else 201, receipt.__dict__
+        if method == "POST" and parsed.path == "/actions":
+            view = service.ingest_action(actor_id=actor_id, **body)
+            return (200 if view["replayed"] else 201), view
+        if method == "GET" and len(segments) == 2 and segments[0] == "decisions":
+            return 200, service.get_decision(segments[1])
+        if method == "GET" and parsed.path == "/interventions":
+            query = parse_qs(parsed.query)
+            status = query.get("status", [None])[0]
+            return 200, {"items": service.list_interventions(status)}
+        if (method == "POST" and len(segments) == 3 and segments[0] == "interventions"
+                and segments[2] == "resolve"):
+            receipt = service.resolve_intervention(actor_id=actor_id, intervention_id=segments[1], **body)
+            return 200 if receipt.replayed else 201, receipt.__dict__
+        if method == "GET" and len(segments) == 2 and segments[0] == "tasks":
+            return 200, service.get_task(segments[1])
         return 404, {"error": "route_not_found", "message": "接口不存在"}
     except DomainError as exc:
         return exc.status, {"error": exc.code, "message": str(exc)}
@@ -58,7 +88,7 @@ def route(service: DomainService, method: str, path: str, body: dict[str, Any] |
 class Handler(BaseHTTPRequestHandler):
     """把标准库 HTTP 请求转换为路由调用。"""
 
-    service: DomainService
+    service: InterventionService
 
     def _handle(self) -> None:
         length = int(self.headers.get("Content-Length", "0"))
@@ -93,13 +123,13 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> int:
     """启动本地 HTTP 服务。"""
 
-    parser = argparse.ArgumentParser(description="启动科技战略协作基础服务")
+    parser = argparse.ArgumentParser(description="启动异常访问实时干预服务")
     parser.add_argument("--database", default="service.sqlite3")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8080)
     args = parser.parse_args()
     database = Database(args.database)
-    Handler.service = DomainService(database)
+    Handler.service = InterventionService(database)
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     try:
         server.serve_forever()
