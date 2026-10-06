@@ -63,6 +63,92 @@ CREATE TABLE IF NOT EXISTS audit_events (
     event_hash TEXT NOT NULL UNIQUE,
     occurred_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS subjects (
+    subject_id TEXT PRIMARY KEY,
+    organization_id TEXT NOT NULL REFERENCES organizations(organization_id),
+    display_name TEXT NOT NULL,
+    trust_tier TEXT NOT NULL CHECK(trust_tier IN ('high', 'medium', 'low')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'suspended')),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS authorization_grants (
+    grant_id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL REFERENCES subjects(subject_id),
+    target_pattern TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    quota_limit INTEGER NOT NULL CHECK(quota_limit >= 1),
+    quota_window_seconds INTEGER NOT NULL CHECK(quota_window_seconds >= 1),
+    valid_from TEXT NOT NULL,
+    valid_until TEXT NOT NULL,
+    status TEXT NOT NULL CHECK(status IN ('active', 'revoked')),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS risk_rules (
+    rule_id TEXT NOT NULL,
+    version INTEGER NOT NULL CHECK(version >= 1),
+    name TEXT NOT NULL,
+    rule_type TEXT NOT NULL,
+    params_json TEXT NOT NULL,
+    score INTEGER NOT NULL CHECK(score >= 0),
+    measure TEXT NOT NULL CHECK(measure IN ('throttle', 'suspend', 'review')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'superseded', 'retired')),
+    created_by TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    PRIMARY KEY (rule_id, version)
+);
+CREATE TABLE IF NOT EXISTS ruleset_generations (
+    generation INTEGER PRIMARY KEY AUTOINCREMENT,
+    change_summary_json TEXT NOT NULL,
+    changed_by TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS action_records (
+    action_id TEXT PRIMARY KEY,
+    subject_id TEXT NOT NULL REFERENCES subjects(subject_id),
+    target TEXT NOT NULL,
+    action_type TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    metadata_json TEXT NOT NULL,
+    payload_hash TEXT NOT NULL,
+    received_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_action_records_subject_time ON action_records(subject_id, occurred_at);
+CREATE TABLE IF NOT EXISTS decisions (
+    decision_id TEXT PRIMARY KEY,
+    action_id TEXT NOT NULL UNIQUE REFERENCES action_records(action_id),
+    subject_id TEXT NOT NULL REFERENCES subjects(subject_id),
+    ruleset_generation INTEGER NOT NULL,
+    risk_score INTEGER NOT NULL,
+    measure TEXT NOT NULL CHECK(measure IN ('allow', 'throttle', 'suspend', 'review')),
+    triggered_json TEXT NOT NULL,
+    features_json TEXT NOT NULL,
+    intervention_id TEXT,
+    decided_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS interventions (
+    intervention_id TEXT PRIMARY KEY,
+    decision_id TEXT NOT NULL REFERENCES decisions(decision_id),
+    subject_id TEXT NOT NULL REFERENCES subjects(subject_id),
+    kind TEXT NOT NULL CHECK(kind IN ('throttle', 'suspend', 'review')),
+    status TEXT NOT NULL CHECK(status IN ('active', 'pending', 'confirmed', 'released')),
+    detail_json TEXT NOT NULL,
+    expires_at TEXT,
+    created_at TEXT NOT NULL,
+    resolved_by TEXT,
+    resolved_at TEXT,
+    resolution TEXT,
+    resolution_reason TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_interventions_subject_status ON interventions(subject_id, status);
+CREATE TABLE IF NOT EXISTS quota_ledger (
+    entry_id TEXT PRIMARY KEY,
+    grant_id TEXT NOT NULL REFERENCES authorization_grants(grant_id),
+    action_id TEXT NOT NULL UNIQUE REFERENCES action_records(action_id),
+    subject_id TEXT NOT NULL,
+    occurred_at TEXT NOT NULL,
+    deducted_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_quota_ledger_grant_time ON quota_ledger(grant_id, occurred_at);
 """
 
 

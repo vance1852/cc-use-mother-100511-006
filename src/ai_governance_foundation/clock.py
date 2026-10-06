@@ -34,3 +34,21 @@ class FixedClock:
         """返回固定的 UTC 时间。"""
 
         return self._value
+
+
+def parse_timestamp(value: str) -> datetime:
+    """解析带时区的 ISO 8601 时间并归一到 UTC。"""
+
+    text = str(value).strip()
+    if text.endswith(("Z", "z")):
+        text = text[:-1] + "+00:00"
+    parsed = datetime.fromisoformat(text)
+    if parsed.tzinfo is None:
+        raise ValueError("时间必须包含时区")
+    return parsed.astimezone(timezone.utc)
+
+
+def format_timestamp(value: datetime) -> str:
+    """格式化为固定宽度、可按字典序比较的 UTC 时间文本。"""
+
+    return value.astimezone(timezone.utc).isoformat(timespec="microseconds").replace("+00:00", "Z")
